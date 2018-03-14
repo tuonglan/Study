@@ -1,0 +1,9 @@
+---
+sudo: true
+port: 22
+ssh_key: 
+forward_agent: 
+username: enswer
+hostname: 192.168.10.55
+password: dmatjddlstlr
+last_action: create

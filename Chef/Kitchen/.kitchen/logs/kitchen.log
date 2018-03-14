@@ -1,0 +1,3 @@
+I, [2016-06-15T16:02:17.449392 #6078]  INFO -- Kitchen: -----> Starting Kitchen (v1.8.0)
+I, [2016-06-15T16:02:17.522142 #6078]  INFO -- Kitchen: -----> Destroying <default-ubuntu-aws0>...
+I, [2016-06-15T16:02:18.519403 #6078]  INFO -- Kitchen: -----> Kitchen is finished. (0m1.07s)

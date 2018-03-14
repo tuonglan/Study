@@ -1,0 +1,10 @@
+class FirstClass:
+	def setData(self, value):
+		self.data = value
+	def display(self):
+		print(self.data)
+
+
+tmp = FirstClass
+tmp.setData(2015)
+mpt.display()

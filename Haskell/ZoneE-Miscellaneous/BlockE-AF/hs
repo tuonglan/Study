@@ -1,0 +1,4 @@
+import Control.Applicative
+
+sequenceA :: [f a] -> f [a]
+sequenceA = foldr (fmap (:)) []

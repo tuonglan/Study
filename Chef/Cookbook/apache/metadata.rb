@@ -1,0 +1,7 @@
+name 'apache'
+maintainer 'Lan Do'
+maintainer_email 'ldo@gracenote.com'
+license 'Gracenote'
+description 'Installs/Configures apache'
+long_description 'Installs/Configures apache'
+version '0.1.0'

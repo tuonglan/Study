@@ -1,0 +1,513 @@
+#include "mplayer.h"
+#include "PacketQueue.h"
+#include <exception>
+#include <SDL.h>
+#include <SDL_thread.h>
+#include <assert.h>
+
+
+extern "C" {
+#include <libavcodec/avcodec.h>
+#include <libavformat/avformat.h>
+#include <libswscale/swscale.h>
+#include <libavutil/samplefmt.h>
+#include <libswresample/swresample.h>
+#include <libavutil/opt.h>
+}
+
+
+#define SDL_AUDIO_BUFFER_SIZE 1024
+#define MAX_AUDIO_FRAME_SIZE 192000
+
+typedef struct CallbackData
+{
+	MPlayer *player;
+	AVCodecContext *ctx;
+	
+	CallbackData(): player(NULL), ctx(NULL) {}
+} CBData;
+
+
+
+MPlayer::MPlayer(char const *input)
+{
+	av_register_all();
+	pFormatCtx = NULL;
+	videoCodecCtx = NULL;
+	audioCodecCtx = NULL;
+	pktQueue = NULL;
+	isPlaying = 0;
+
+	// Open an input
+	try
+	{
+		// Open the input
+		if (avformat_open_input(&pFormatCtx, input, NULL, NULL) != 0)
+		{
+			fprintf(stderr, "Could not open file\n");
+			throw new MPInitException();
+		}
+		if (avformat_find_stream_info(pFormatCtx, NULL) < 0)
+		{
+			fprintf(stderr, "No stream found\n");
+			avformat_close_input(&pFormatCtx);
+			throw new MPInitException();
+		}
+
+		// Find the stream index of audio & video
+		audioStreamIdx = -1;
+		videoStreamIdx = -1;
+		for (int i=0;i<pFormatCtx->nb_streams;i++)
+		{
+			if ((audioStreamIdx < 0) && (pFormatCtx->streams[i]->codec->codec_type == AVMEDIA_TYPE_AUDIO))
+				audioStreamIdx = i;
+			if ((videoStreamIdx < 0) && (pFormatCtx->streams[i]->codec->codec_type == AVMEDIA_TYPE_VIDEO))
+				videoStreamIdx = i;
+		}
+		if ((audioStreamIdx == -1) || (videoStreamIdx == -1))
+		{
+			fprintf(stderr, "No stream for both video & audio\n");
+			throw new MPInitException();
+		}
+
+		// Copy the audio codec contexts
+		AVCodec *pCodec = NULL;
+		pCodec = avcodec_find_decoder(pFormatCtx->streams[audioStreamIdx]->codec->codec_id);
+		if (pCodec == NULL)
+		{
+			fprintf(stderr, "Unsupport audio codec\n");
+			throw new MPInitException();
+		}
+		audioCodecCtx = avcodec_alloc_context3(pCodec);
+		if (avcodec_copy_context(audioCodecCtx, pFormatCtx->streams[audioStreamIdx]->codec) != 0)
+		{
+			fprintf(stderr, "Couldn't copy codec context\n");
+			throw new MPInitException();
+		}
+		avcodec_open2(audioCodecCtx, pCodec, NULL);		// Open the audio context
+
+		// Copy the video codec
+		//av_free(pCodec); 	***Note: No need to free pCodec because it points to an object in stack, not heap.
+		pCodec = avcodec_find_decoder(pFormatCtx->streams[videoStreamIdx]->codec->codec_id);
+		if (pCodec == NULL)
+		{
+			fprintf(stderr, "Unsupport video codec\n");
+			throw new MPInitException();
+		}
+		videoCodecCtx = avcodec_alloc_context3(pCodec);
+		if (avcodec_copy_context(videoCodecCtx, pFormatCtx->streams[videoStreamIdx]->codec) != 0)
+		{
+			fprintf(stderr, "Couln' copy video codec context\n");
+			throw new MPInitException();
+		}
+		avcodec_open2(videoCodecCtx, pCodec, NULL);		// Open the video context
+
+	} 
+	catch (MPInitException &e)
+	{
+		fprintf(stderr,"Exception thrown: %s\n", e.what());
+		
+		// Clean up before exit
+		this->cleanup();
+		exit(-1);
+	}
+}
+
+
+MPlayer::~MPlayer()
+{
+	this->cleanup();
+	delete pktQueue;
+}
+
+
+void MPlayer::cleanup()
+{
+	// Close the context
+	avcodec_close(audioCodecCtx);
+	avcodec_close(videoCodecCtx);
+	avformat_close_input(&pFormatCtx);
+
+	// Free the context
+	avcodec_free_context(&audioCodecCtx);
+	avcodec_free_context(&videoCodecCtx);
+	avformat_free_context(pFormatCtx);
+}
+
+
+void MPlayer::readPacket(void (MPlayer::*cbFunc)(void *data), AVFrame *pFrame, void *data)
+{
+	int frameFinished;
+	//AVFrame *pFrame = av_frame_alloc();
+	AVPacket packet;
+	while (av_read_frame(pFormatCtx, &packet) >= 0)
+	{
+		// If this packet is the video packet
+		
+	}
+}
+
+
+void MPlayer::extractFrame(int const framePeriod)
+{
+	// Init the RGB frame
+	AVFrame *pFrameRGB = av_frame_alloc();
+	if (pFrameRGB == NULL)
+	{
+		fprintf(stderr, "Cannot allocate the rgb rame\n");
+		throw new MPExtractException();
+	}
+	int numBytes = avpicture_get_size(PIX_FMT_RGB24, videoCodecCtx->width, videoCodecCtx->height);
+	uint8_t *buffer = (uint8_t *)av_malloc(numBytes*sizeof(uint8_t));
+	
+
+	// Setup the structure used to save RGB frame
+	avpicture_fill((AVPicture *)pFrameRGB, buffer, PIX_FMT_RGB24, videoCodecCtx->width, videoCodecCtx->height);
+
+	// Setup the swsscale context for converting format
+	struct SwsContext *swsCtx = sws_getContext(videoCodecCtx->width,
+		videoCodecCtx->height, videoCodecCtx->pix_fmt,
+		videoCodecCtx->width, videoCodecCtx->height,
+		PIX_FMT_RGB24, SWS_BILINEAR,
+		NULL, NULL, NULL
+		);
+
+	// Start reading each packet
+	int i= 0;
+	int frameFinished;
+	AVFrame *pFrame = av_frame_alloc();
+	AVPacket packet;
+	while (av_read_frame(pFormatCtx, &packet) >= 0)
+	{
+		// If this packet is a video packet
+		if (packet.stream_index == videoStreamIdx)
+		{
+			// Decode the video frame
+			avcodec_decode_video2(videoCodecCtx, pFrame, &frameFinished, &packet);
+
+			// If we get an video frame
+			if (frameFinished)
+			{
+				// Convert the video to RGB
+				sws_scale(swsCtx, (uint8_t const * const *)pFrame->data,
+						pFrame->linesize, 0, videoCodecCtx->height,
+						pFrameRGB->data, pFrameRGB->linesize
+					);
+
+				// Save the frame to disk
+				if (++i %framePeriod == 0)
+					this->saveFrameToDisk(pFrameRGB, videoCodecCtx->width, videoCodecCtx->height, i);
+			}
+		}
+
+		// Free the packet allocated by av_read_frame
+		av_free_packet(&packet);
+	}
+	av_free(pFrame);
+	
+
+	av_free(buffer);
+	av_free(pFrameRGB);
+}
+
+
+void MPlayer::saveFrameToDisk(AVFrame const *pFrame, int width, int height, int index) const 
+{
+	char fileName[32];
+	sprintf(fileName, "Output/frame-%d.ppm", index);
+
+	FILE *fileStream = fopen(fileName, "wb");
+	if (fileStream == NULL)
+	{
+		fprintf(stderr, "Can't open file %s\n", fileName);
+		return;
+	}
+	
+	// Write the header
+	fprintf(fileStream, "P6\n%d %d\n255\n", width, height);
+
+	// Write the data
+	for (int i=0;i< height;i++)
+		fwrite(pFrame->data[0] + i*pFrame->linesize[0], 1, width*3, fileStream);
+
+	fclose(fileStream);
+}
+
+
+void MPlayer::playVideo()
+{
+	// Init the SDL Display window
+	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER))
+	{
+		fprintf(stderr, "Could not initialize the SDL - %s\n", SDL_GetError());
+		exit(1);
+	}
+
+	// Creating a Display
+	SDL_Surface *screen;
+	screen = SDL_SetVideoMode(videoCodecCtx->width, videoCodecCtx->height, 0, 0);
+	if (!screen)
+	{
+		fprintf(stderr, "SDL: Could not set the video mode for SDL screen - exiting\n");
+		exit(-1);
+	}
+
+	// Create an overlay
+	SDL_Overlay *bmp = SDL_CreateYUVOverlay(videoCodecCtx->width, videoCodecCtx->height, SDL_YV12_OVERLAY, screen);
+	SDL_Rect rect;
+	rect.x = 0; rect.y = 0;
+	rect.w = videoCodecCtx->width;
+	rect.h = videoCodecCtx->height;
+
+	// Initalize the SWS conext for software scaling
+	struct SwsContext *swsCtx = sws_getContext(videoCodecCtx->width,
+			videoCodecCtx->height,
+			videoCodecCtx->pix_fmt,
+			videoCodecCtx->width,
+			videoCodecCtx->height,
+			PIX_FMT_YUV420P,
+			SWS_BILINEAR,
+			NULL, NULL, NULL
+		);
+
+
+	// Setup the SDL Audio
+	SDL_AudioSpec targetSpec;
+	SDL_AudioSpec obtainedSpec;
+	targetSpec.freq = audioCodecCtx->sample_rate;
+	targetSpec.format = AUDIO_F32;
+	targetSpec.channels = audioCodecCtx->channels;
+	targetSpec.silence = 0;
+	targetSpec.samples = SDL_AUDIO_BUFFER_SIZE;
+	targetSpec.callback = &MPlayer::audio_callback;
+	targetSpec.userdata = this;
+	
+	if (SDL_OpenAudio(&targetSpec, &obtainedSpec) < 0)
+	{
+		fprintf(stderr, "SDL_OpenAudio: %s\n", SDL_GetError());
+		return;
+	}
+	SDL_PauseAudio(0);
+
+	// Start reading each packet
+	int frameFinished;
+	AVFrame *pFrame = av_frame_alloc();
+	pktQueue = new PacketQueue();
+	AVPacket packet;
+	SDL_Event event;
+	isPlaying = 1;
+	while (av_read_frame(pFormatCtx, &packet) >= 0)
+	{
+		// If this is the videopacket
+		if (packet.stream_index == videoStreamIdx)
+		{
+			// Decode the packet into the pFrame
+			avcodec_decode_video2(videoCodecCtx, pFrame, &frameFinished, &packet);
+
+			// If we get an video frame
+			if (frameFinished)
+			{
+				SDL_LockYUVOverlay(bmp);
+				AVPicture pict;
+				pict.data[0] = bmp->pixels[0];
+				pict.data[1] = bmp->pixels[2];
+				pict.data[2] = bmp->pixels[1];
+
+				pict.linesize[0] = bmp->pitches[0];
+				pict.linesize[1] = bmp->pitches[2];
+				pict.linesize[2] = bmp->pitches[1];
+
+				// Convert the frame to target pictures
+				sws_scale(swsCtx, (uint8_t const * const *)pFrame->data, 
+					pFrame->linesize, 0, videoCodecCtx->height,
+					pict.data, pict.linesize
+					);
+
+				// Unlock and display the SDL overlay
+				SDL_UnlockYUVOverlay(bmp);
+				SDL_DisplayYUVOverlay(bmp, &rect);
+			}
+
+			// Dereference the pFrame
+			av_frame_unref(pFrame);
+			av_free_packet(&packet);	// Free the packet allocatdded by av_read_frame
+		}
+		else if (packet.stream_index == audioStreamIdx)
+		{
+			pktQueue->push(&packet);
+		}
+		else
+			av_free_packet(&packet);
+
+		SDL_PollEvent(&event);
+		switch(event.type)
+		{
+		case SDL_QUIT:
+			isPlaying = 0;
+			pktQueue->stopPoppingThread();
+			SDL_Quit();
+			exit(0);
+			break;
+		default:
+			break;
+		}
+	}
+
+	delete pktQueue; pktQueue = NULL;
+	av_free(pFrame);
+	SDL_FreeYUVOverlay(bmp);
+}
+
+
+void MPlayer::audio_callback(void *userdata, Uint8 *stream, int len)
+{
+	MPlayer *player = static_cast<MPlayer *>(userdata);
+	
+	static uint8_t audioBuff[(MAX_AUDIO_FRAME_SIZE * 3) / 2];
+	static unsigned int audioBuffSize = 0;
+	static unsigned int audioBuffIndex = 0;
+
+	while (len > 0)
+	{
+		int audioSize = 0;
+		if (audioBuffSize >= audioBuffIndex)
+		{
+			// All data has been sent out, get more
+			audioSize = player->audio_decode_frame(audioBuff, sizeof(audioBuff));
+			if (audioSize < 0)
+			{
+				// Error, output silence
+				audioBuffSize = 1024;
+				memset(audioBuff, 0, audioBuffSize);
+			}
+			else
+				audioBuffSize = audioSize;
+			audioBuffIndex = 0;
+		}
+
+		int copiedLen = audioBuffSize - audioBuffIndex;
+		if (copiedLen > len)
+			copiedLen = len;
+		memcpy(stream, (uint8_t *)audioBuff + audioBuffIndex, copiedLen);
+		len -= copiedLen;
+		stream += copiedLen;
+		audioBuffIndex += copiedLen;
+	}
+}
+
+
+int MPlayer::audio_decode_frame(unsigned char *audioBuf, int bufSize)
+{
+	static AVPacket pkt;
+	static uint8_t *audioPktData = NULL;
+	static int audioPktSize = 0;
+	static AVFrame frame;
+
+	while(true)
+	{
+		// If isStop, stop it
+		if (!isPlaying)
+			return -1;
+
+		// If the audio packet is used up, request a new one
+		// Stop with queue
+		if (audioPktSize <= 0)
+		{
+			av_free_packet(&pkt);
+			memset(&pkt, 0, sizeof(AVPacket));
+			if (this->pktQueue->pop(&pkt, 1) < 0)
+				return -1;
+			audioPktSize = pkt.size;
+			audioPktData = pkt.data;
+		}
+
+		// Start decoding now
+		int receivedFrames = 0;
+		int len = avcodec_decode_audio4(this->audioCodecCtx, &frame, &receivedFrames, &pkt);
+		if (len < 0)
+		{
+			// The frame is error, skip it
+			audioPktSize = 0;
+			continue;
+		}
+		
+		// Packet decode successfully, 
+		audioPktSize -= len;
+		int dataSize = 0;
+		if (receivedFrames)
+		{
+			dataSize = av_samples_get_buffer_size(NULL, audioCodecCtx->channels,
+				frame.nb_samples, audioCodecCtx->sample_fmt, 1
+				);
+			assert(dataSize <= bufSize);
+			if (dataSize <= 0)
+				continue;
+
+			// Copy the audio buffer from two planes to the buffer
+			int sampleSize = dataSize/(frame.nb_samples*2);
+			for (int i=0; i < frame.nb_samples; i++)
+			{
+				memcpy(audioBuf + 2*i*sampleSize, frame.data[0], sampleSize);
+				memcpy(audioBuf + (2*i+1)*sampleSize, frame.data[1], sampleSize);
+			}
+			// this->saveAudioToDisk(&frame);
+			return dataSize;
+		}
+	}
+
+	return 0;
+}
+
+
+void MPlayer::saveAudioToDisk(AVFrame const * const aFrame)
+{
+	// Convert the float multiplanar to S16
+	int rt = -1;
+	static struct SwrContext *swrCtx = NULL;
+	if (swrCtx == NULL)
+	{
+		swrCtx = swr_alloc();
+		av_opt_set_int(swrCtx, "in_channel_layout", 2, 0);
+		av_opt_set_int(swrCtx, "in_sample_rate", audioCodecCtx->sample_rate, 0);
+		av_opt_set_int(swrCtx, "in_sample_fmt", audioCodecCtx->sample_fmt, 0);
+
+		av_opt_set_int(swrCtx, "out_channel_layout", 2, 0);
+		av_opt_set_int(swrCtx, "out_sample_rate", audioCodecCtx->sample_rate, 0);
+		av_opt_set_int(swrCtx, "out_sample_fmt", AV_SAMPLE_FMT_S32, 0);
+
+		// Initialize the resampling context
+		if ((rt = swr_init(swrCtx)) < 0)
+		{
+			fprintf(stderr, "Can't init the converting context for audio\n");
+			return;
+		}
+	}
+
+	// Resample the frame
+	int dst_sampleCount = aFrame->nb_samples;
+	uint8_t **buf = NULL;
+	int dst_linesize;
+	av_samples_alloc_array_and_samples(&buf, &dst_linesize, 2, dst_sampleCount, AV_SAMPLE_FMT_S32, 1);
+	rt = swr_convert(swrCtx, buf, dst_sampleCount, const_cast<const uint8_t **>(aFrame->data), aFrame->nb_samples);
+
+	// Write to file
+	int bufSize = av_samples_get_buffer_size(NULL, audioCodecCtx->channels, aFrame->nb_samples, audioCodecCtx->sample_fmt, 1);
+	
+	// Resample file
+	static FILE *resa_stream = fopen("audioOutput-resample.pcm", "wb");
+	fwrite(buf[0], bufSize/2, 1, resa_stream);
+
+	// Original file
+	static FILE *audioStream = fopen("audioOutput.pcm", "wb");
+	int sampleSize = bufSize/(aFrame->nb_samples*2);
+	for (int i=0; i < aFrame->nb_samples;i++)
+	{
+		fwrite(aFrame->data[0]+i*sampleSize, sampleSize, 1, audioStream);
+		fwrite(aFrame->data[1] + i*sampleSize, sampleSize, 1, audioStream);
+	}
+
+	av_freep(&buf[0]);
+	av_freep(&buf);
+}
+
+

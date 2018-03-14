@@ -1,0 +1,41 @@
+---
+driver:
+    name: ec2
+    aws_ssh_key_id: Amazone - Chef
+    security_group_ids: ["sg-d9e184b0"]
+    region: ap-northeast-2
+    availability_zone: a
+    require_chef_omnibus: true
+    instance_type: t2.micro
+    associate_public_ip: true
+    shared_credentials_profile: AWS
+
+provisioner:
+    name: chef_zero
+    environments_path: ../../environments
+    roles_path: ../../roles
+
+platforms:
+    - name: ubuntu-all
+      driver:
+        image_id: ami-09dc1267
+      transport:
+        ssh_key: /home/lando/.ssh/AWS.pem
+        username: ubuntu
+
+suites:
+    - name: prod
+      provisioner:
+        client_rb:
+          environment: production
+      run_list:
+        - recipe[apache-new::default]
+      attributes:
+    
+    - name: dev
+      provisioner:
+        client_rb:
+          environment: dev
+      run_list:
+        - recipe[apache::default]
+      attributes:

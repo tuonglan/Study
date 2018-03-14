@@ -1,0 +1,3 @@
+I, [2016-06-15T16:02:17.522223 #6078]  INFO -- default-ubuntu-aws0: -----> Destroying <default-ubuntu-aws0>...
+I, [2016-06-15T16:02:18.518142 #6078]  INFO -- default-ubuntu-aws0: EC2 instance <i-06e8d4916223cd5f1> destroyed.
+I, [2016-06-15T16:02:18.519015 #6078]  INFO -- default-ubuntu-aws0: Finished destroying <default-ubuntu-aws0> (0m1.00s).

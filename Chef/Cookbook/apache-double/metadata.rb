@@ -1,0 +1,7 @@
+name 'apache-double'
+maintainer 'The Authors'
+maintainer_email 'you@example.com'
+license 'all_rights'
+description 'Installs/Configures apache-double'
+long_description 'Installs/Configures apache-double'
+version '0.1.0'

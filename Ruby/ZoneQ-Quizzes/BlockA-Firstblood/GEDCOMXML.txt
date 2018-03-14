@@ -1,0 +1,16 @@
+<gedcom>
+    <INDI id='@I1@'>
+        <NAME>
+            Jamis Godon /Buck/
+            <SURN>
+                Buck
+            </SURN>
+            <GIVN>
+                Jamis Gordon
+            </GIVN>
+        </NAME>
+        <SEX>
+            M
+        </SEX>
+    </INDI>
+</gedcom>

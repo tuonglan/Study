@@ -1,0 +1,16 @@
+<html>
+<body>
+<pre><code>
+    This site was setup by <%= node['hotsname'] %>
+    My network addresses are:
+    <% node['network']['interfaces'].keys.each do |interface| %>
+        * <%= interface %>: <%= node['network']['interfaces'][interface]['addresses'].keys[1] %>
+    <% end %>
+
+    This is json value:
+    <% node['network']['interfaces'].each do |interface| %>
+        * <%= interface %>
+    <% end %>
+</code></pre>
+</body>
+</html>

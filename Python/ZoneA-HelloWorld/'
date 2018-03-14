@@ -1,0 +1,9 @@
+import re
+
+phoneNumberReg = re.compile(r'\d\d\d-\d\d\d-\d\d\d\d')
+mo = phoneNumberReg.search('My number is 415-555-4242')
+print(mo.group())
+
+heroReg = re.compile(r'Batman|Superman')
+mo = heroReg.findall('The battle between Batman vs. Superman')
+print(mo)

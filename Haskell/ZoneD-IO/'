@@ -1,0 +1,5 @@
+import Control.Monad
+main = do
+	line <- getLine
+	when (line == "Swordfish") $ do
+		putStrLn line

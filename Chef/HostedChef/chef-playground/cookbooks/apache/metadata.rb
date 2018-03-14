@@ -1,0 +1,7 @@
+name 'apache-new'
+maintainer 'Lan Do'
+maintainer_email 'lando@mail.com'
+license 'Gracenote'
+description 'Installs/Configures apache'
+long_description 'Installs/Configures apache'
+version '0.2.0'
