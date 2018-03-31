@@ -5,6 +5,7 @@ import tornado.options
 import tornado.web
 
 from tornado.options import define, options
+from handlers import FileHandler
 
 define("port", default=8888, help="run on the given port", type=int)
 gl_port = None
@@ -25,6 +26,7 @@ def main():
 
     application = tornado.web.Application([
         (r"/status", MainHandler),
+        (r"/test/file", FileHandler)
     ])
     http_server = tornado.httpserver.HTTPServer(application)
     http_server.listen(args.port)
